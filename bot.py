@@ -1,99 +1,89 @@
-import os
+import os #importando a biblioteca os (operational system) para interagir com o sistema operacional do pc
+import requests #importando a biblioteca que é o que faz possível se comunicar com o telegram
+from dotenv import load_dotenv #carregando a variável de ambiente para meu código
 
-import requests
-from dotenv import load_dotenv
+load_dotenv(".env") #especificamente o arquivo .env
 
-load_dotenv(".env")
+token = os.getenv("TELEGRAM_TOKEN") #pegando o valor da string?var? específica dentro do meu arquivo .env
+chave = os.getenv("WEATHERSTACK_KEY") #pegando o valor da string?var? específica dentro do meu arquivo .env
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-WEATHER_KEY = os.getenv("WEATHERSTACK_KEY")
-
-TELEGRAM_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
-# O plano gratuito da Weatherstack só aceita HTTP (não HTTPS)
-WEATHER_URL = "http://api.weatherstack.com/current"
-
-AJUDA = (
-    "Olá! Eu sou o bot do clima ☀️\n\n"
-    "Me envie o nome de uma cidade (ex: São Paulo) "
-    "ou use /clima <cidade> que eu te digo como está o tempo lá."
-)
+url_telegram = "https://api.telegram.org/bot" + token #abre o link do telegram + meu token. 
+url_clima = "http://api.weatherstack.com/current" #abre o link direto da api do weatherstack
 
 
-def buscar_clima(cidade):
-    """Consulta a API Weatherstack e devolve um texto pronto para enviar."""
-    resposta = requests.get(
-        WEATHER_URL,
-        params={"access_key": WEATHER_KEY, "query": cidade, "units": "m"},
-        timeout=15,
-    ).json()
+def buscar_clima(cidade): #define uma função que busca o clima tendo em base o valor da variável cidade
+    dados = requests.get(
+        url_clima,
+        params={"access_key": chave, "query": cidade, "units": "m"},
+        timeout=15, #se passar de 15 para?
+    ).json() #pedindo as informações ao Weatherstack
 
-    if "current" not in resposta:
-        return f"Não consegui encontrar o clima de '{cidade}'. Confira o nome e tente de novo."
+    if "current" not in dados: #se o que for digitado não estiver armazenado nos dados da api
+        return "Não consegui encontrar o clima de '" + cidade + "'. Confira o nome e tente novamente." #emite a mensagem anterior
 
-    local = resposta["location"]
-    atual = resposta["current"]
-    descricao = ", ".join(atual["weather_descriptions"])
+    nome = dados["location"]["name"]
+    pais = dados["location"]["country"]
+    temperatura = dados["current"]["temperature"]
+    sensacao = dados["current"]["feelslike"]
+    condicao = ", ".join(dados["current"]["weather_descriptions"])
+    umidade = dados["current"]["humidity"]
+    vento = dados["current"]["wind_speed"] #pega palavras da mensagem retornada pelo weatherstack e separa em variáveis específicas
 
-    return (
-        f"📍 {local['name']}, {local['country']}\n"
-        f"🌡️ Temperatura: {atual['temperature']}°C "
-        f"(sensação de {atual['feelslike']}°C)\n"
-        f"☁️ Condição: {descricao}\n"
-        f"💧 Umidade: {atual['humidity']}%\n"
-        f"💨 Vento: {atual['wind_speed']} km/h"
-    )
+    texto = "📍 " + nome + ", " + pais + "\n" #armazena as palavras que interessam junto com um texto montado em variáveis
+    texto += "🌡️ Temperatura: " + str(temperatura) + "°C (sensação de " + str(sensacao) + "°C)\n"
+    texto += "☁️ Condição: " + condicao + "\n"
+    texto += "💧 Umidade: " + str(umidade) + "%\n"
+    texto += "💨 Vento: " + str(vento) + " km/h"
+    return texto #retorna o texto inteiro em uma mensagem de texto
 
 
-def enviar_mensagem(chat_id, texto):
+def enviar_mensagem(chat_id, texto): #define mais uma função para enviar a mensagem
     requests.post(
-        f"{TELEGRAM_URL}/sendMessage",
+        url_telegram + "/sendMessage",
         data={"chat_id": chat_id, "text": texto},
         timeout=15,
     )
 
 
-def tratar_mensagem(chat_id, texto):
-    texto = texto.strip()
+def tratar_mensagem(chat_id, texto): #define mais uma função para tratar a mensagem do usuário
+    texto = texto.strip() #esse .strip remove espaços antes e depois da mensagem
 
-    if texto in ("/start", "/help"):
-        enviar_mensagem(chat_id, AJUDA)
-    elif texto.startswith("/clima"):
+    if texto == "/start" or texto == "/help": #se o texto for algum dos comandos para iniciar
+        enviar_mensagem(
+            chat_id,
+            "Oi! Eu sou o bot do clima ☀️\n\n"
+            "Digite o nome de uma cidade (ex: São Paulo) "
+            "ou use /clima (nome da cidade) que eu te digo como está o tempo lá.",
+        ) #ele envia essa mensagem específica
+    elif texto.startswith("/clima"): #se a mensagem for pedindo o clima
         cidade = texto.replace("/clima", "", 1).strip()
-        if not cidade:
-            enviar_mensagem(chat_id, "Use assim: /clima São Paulo")
+        if cidade == "":
+            enviar_mensagem(chat_id, "Use assim: /clima São Paulo") #caso a pessoa não tenha digitado nada depois do comando de clima
         else:
-            enviar_mensagem(chat_id, buscar_clima(cidade))
+            enviar_mensagem(chat_id, buscar_clima(cidade)) #caso tenha preenchido o comando e mais alguma coisa, procura a cidade com base nessa outra coisa
     else:
-        # qualquer outro texto é tratado como nome de cidade
-        enviar_mensagem(chat_id, buscar_clima(texto))
+        enviar_mensagem(chat_id, buscar_clima(texto)) #caso mande só um texto sem comando, assume que é uma cidade e procura
 
 
-def main():
-    if not TELEGRAM_TOKEN or not WEATHER_KEY:
-        raise SystemExit("Faltam TELEGRAM_TOKEN ou WEATHERSTACK_KEY no arquivo .env")
+if not token or not chave:
+    raise SystemExit("Faltam TELEGRAM_TOKEN ou WEATHERSTACK_KEY no arquivo .env") #confere o token e a chave. se faltar algum, o programa encerra.
 
-    print("Bot rodando... (Ctrl+C para parar)")
-    offset = None  # guarda qual foi a última atualização já lida
+print("(O bot está rodando...)") #emite a mensagem que o bot está rodando 
+offset = None
 
-    while True:
-        try:
-            params = {"timeout": 30}
-            if offset:
-                params["offset"] = offset
+while True:
+    try:
+        params = {"timeout": 30}
+        if offset:
+            params["offset"] = offset
 
-            updates = requests.get(
-                f"{TELEGRAM_URL}/getUpdates", params=params, timeout=40
-            ).json()
+        resposta = requests.get(url_telegram + "/getUpdates", params=params, timeout=40).json()
 
-            for update in updates.get("result", []):
-                offset = update["update_id"] + 1
-                mensagem = update.get("message")
-                if mensagem and "text" in mensagem:
-                    tratar_mensagem(mensagem["chat"]["id"], mensagem["text"])
+        for update in resposta.get("result", []):
+            offset = update["update_id"] + 1
+            mensagem = update.get("message")
+            if mensagem and "text" in mensagem:
+                tratar_mensagem(mensagem["chat"]["id"], mensagem["text"])
 
-        except requests.RequestException as erro:
-            print("Erro de conexão:", erro)
-
-
-if __name__ == "__main__":
-    main()
+    except requests.RequestException as erro:
+        print("Erro de conexão:", erro)
